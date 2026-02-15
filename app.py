@@ -63,22 +63,25 @@ if 'user_type' not in st.session_state: st.session_state.user_type = None
 if 'username' not in st.session_state: st.session_state.username = None
 if 'current_page' not in st.session_state: st.session_state.current_page = 'login'
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
-if 'selected_model' not in st.session_state: st.session_state.selected_model = "gemini-pro"
+if 'selected_model' not in st.session_state: st.session_state.selected_model = "gemini-1.5-flash"
 
 def navigate_to(page):
     st.session_state.current_page = page
     st.rerun()
 
-# --- 5. HELPER: FETCH AVAILABLE MODELS ---
+# --- 5. HELPER: FETCH AVAILABLE MODELS (CACHED TO FIX 429 ERROR) ---
+@st.cache_data
 def get_available_models(api_key):
-    """Asks Google which models are actually available for this key"""
+    """Asks Google which models are actually available for this key. Cached to prevent quota spam."""
     if not api_key or not HAS_AI: return []
     try:
         genai.configure(api_key=api_key)
         models = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                models.append(m.name)
+                # Filter for common chat models
+                if 'gemini' in m.name:
+                    models.append(m.name)
         return models
     except:
         return []
@@ -104,14 +107,22 @@ def render_sidebar():
             
             if key:
                 st.session_state.api_key = key
-                # Auto-fetch models
+                # Auto-fetch models (Cached!)
                 valid_models = get_available_models(key)
+                
                 if valid_models:
-                    st.success(f"✅ Key Active! ({len(valid_models)} models found)")
+                    st.success(f"✅ Key Active!")
                     # Dropdown to pick model
-                    st.session_state.selected_model = st.selectbox("Select AI Model", valid_models, index=0)
+                    # Try to set default to flash if available (faster/cheaper)
+                    default_idx = 0
+                    for i, m in enumerate(valid_models):
+                        if 'flash' in m:
+                            default_idx = i
+                            break
+                            
+                    st.session_state.selected_model = st.selectbox("Select AI Model", valid_models, index=default_idx)
                 else:
-                    st.warning("⚠️ Key invalid or no models found.")
+                    st.warning("⚠️ Key invalid or quota exceeded.")
             else:
                 st.info("Paste Key to enable AI")
         
@@ -232,10 +243,17 @@ def student_ai():
             with st.spinner("Thinking..."): st.info(get_ai_answer(q, "PDF Content" if uploaded else "General"))
             
     with tab2:
-        st.write("Generate Quiz from File")
+        st.subheader("Generate Quiz from File")
+        # RESTORED FILE UPLOADER HERE
+        q_file = st.file_uploader("Upload PDF for Quiz", type="pdf", key="q_maker_upload")
+        
         if st.button("Generate"):
-            qs = get_ai_questions("Uploaded File", "General", 3)
-            for i, q in enumerate(qs): st.write(f"**Q{i+1}: {q['q']}** (Ans: {q['ans']})")
+            if not q_file:
+                st.error("Please upload a file first.")
+            else:
+                with st.spinner("Creating Quiz..."):
+                    qs = get_ai_questions("Uploaded File", "General", 3)
+                    for i, q in enumerate(qs): st.write(f"**Q{i+1}: {q['q']}** (Ans: {q['ans']})")
 
 def teacher_dashboard():
     st.title("👨‍🏫 Teacher Dashboard")
