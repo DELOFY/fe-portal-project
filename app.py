@@ -51,7 +51,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# [cite_start]--- 3. SYLLABUS DATA [cite: 1443, 1722, 1778, 1859, 1946, 2018, 2091, 2166, 2210] ---
+# --- 3. SYLLABUS DATA ---
 # Extracted from your uploaded Syllabus PDF
 SYLLABUS = {
     "Engineering Physics": {"chapters": ["Fundamentals of Photonics", "Quantum Physics", "Wave Optics", "Semiconductor Physics", "Nanoparticles"]},
@@ -117,8 +117,8 @@ def get_ai_questions(subject, chapter, count=5):
     if api_key and HAS_AI:
         try:
             genai.configure(api_key=api_key)
-            # Switch to 'gemini-1.5-flash' (standard free model)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # FIX: Switched to 'gemini-pro' (Fixes the 404 error)
+            model = genai.GenerativeModel('gemini-pro')
             
             prompt = f"""
             Generate {count} multiple-choice questions for Engineering subject '{subject}' related to '{chapter}'.
@@ -145,7 +145,8 @@ def get_ai_answer(question, context="General Engineering"):
     if api_key and HAS_AI:
         try:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # FIX: Switched to 'gemini-pro'
+            model = genai.GenerativeModel('gemini-pro')
             res = model.generate_content(f"Context: {context}. Question: {question}")
             return res.text
         except Exception as e:
