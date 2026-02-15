@@ -7,7 +7,7 @@ import time
 import random
 import os
 
-# --- 1. SETUP & CONFIGURATION ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(
     page_title="FE Portal 2024",
     page_icon="🎓",
@@ -48,28 +48,19 @@ st.markdown("""
     .stRadio > label:hover {
         border-color: #4db8ff;
     }
-    .success-box {
-        padding: 15px;
-        border-radius: 10px;
-        background-color: rgba(0, 255, 0, 0.1);
-        border: 1px solid #00ff00;
-    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DATA & SYLLABUS ---
+# --- 3. SYLLABUS DATA ---
 SYLLABUS = {
-    "Engineering Physics": {"chapters": ["Fundamentals of Photonics", "Quantum Physics", "Wave Optics", "Semiconductor Physics", "Nanoparticles"]},
-    "Engineering Chemistry": {"chapters": ["Water Technology", "Instrumental Methods", "Advanced Materials", "Energy Sources", "Corrosion"]},
-    "Basic Electrical Engineering": {"chapters": ["DC Circuits", "Electromagnetism", "AC Fundamentals", "AC Circuits", "Electric Machines"]},
+    "Engineering Physics": {"chapters": ["Fundamentals of Photonics", "Quantum Physics", "Wave Optics", "Semiconductor Physics"]},
+    "Engineering Chemistry": {"chapters": ["Water Technology", "Instrumental Methods", "Advanced Materials", "Corrosion"]},
+    "Basic Electrical Engineering": {"chapters": ["DC Circuits", "Electromagnetism", "AC Fundamentals", "Electric Machines"]},
     "Basic Electronics Engineering": {"chapters": ["Diodes", "Transistors", "Logic Gates", "Op-Amp", "Sensors"]},
     "Engineering Mechanics": {"chapters": ["Force Systems", "Equilibrium", "Friction", "Kinematics", "Kinetics"]},
-    "Engineering Graphics": {"chapters": ["Drawing Fundamentals", "Projection of Plane", "Engineering Curves", "Orthographic Projection", "Isometric Projection"]},
-    "Engineering Mathematics-I": {"chapters": ["Calculus", "Multivariable Calculus", "Partial Differentiation", "Matrices", "Eigen Values"]},
-    "Engineering Mathematics-II": {"chapters": ["Integral Calculus", "Solid Geometry", "Multiple Integrals", "ODE", "Diff Eq Applications"]},
-    "Fundamentals of Programming Languages": {"chapters": ["C Intro", "Operators", "Control Flow", "Arrays", "Functions"]},
-    "Programming and Problem Solving": {"chapters": ["Python Intro", "Data Types", "Functions & Strings", "File Handling", "OOP"]},
-    "Manufacturing Practice Workshop": {"chapters": ["Safety", "Cutting", "Sheet Metal", "CNC", "3D Printing"]}
+    "Engineering Graphics": {"chapters": ["Projections", "Curves", "Isometric Projection"]},
+    "Engineering Mathematics-I": {"chapters": ["Calculus", "Matrices", "Eigen Values"]},
+    "Programming": {"chapters": ["C Intro", "Control Flow", "Arrays", "Functions"]}
 }
 
 # Static Fallback Questions (Used if AI fails)
