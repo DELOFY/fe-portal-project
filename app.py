@@ -52,7 +52,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 3. SYLLABUS DATA ---
-# Extracted from your uploaded Syllabus PDF
 SYLLABUS = {
     "Engineering Physics": {"chapters": ["Fundamentals of Photonics", "Quantum Physics", "Wave Optics", "Semiconductor Physics", "Nanoparticles"]},
     "Engineering Chemistry": {"chapters": ["Water Technology", "Instrumental Methods", "Advanced Materials", "Energy Sources", "Corrosion"]},
@@ -65,7 +64,6 @@ SYLLABUS = {
 }
 
 # --- 4. EXTENDED STATIC BACKUP (15 Questions) ---
-# Used if AI fails so you don't see the "Same 3 Questions"
 STATIC_QUESTIONS = {
     "Default": [
         {"q": "Which law states V=IR?", "opts": ["Ohm's Law", "Newton's Law", "Kirchhoff's Law", "Faraday's Law"], "ans": "Ohm's Law"},
@@ -86,7 +84,65 @@ STATIC_QUESTIONS = {
     ]
 }
 
-# --- 5. HELPER FUNCTIONS ---
+# --- 5. SMART AI FUNCTIONS ---
+def get_working_model(api_key):
+    """
+    Tries multiple model names to find one that works for the user's key.
+    """
+    possible_models = ["gemini-1.5-flash", "gemini-pro", "gemini-1.0-pro", "gemini-1.5-pro-latest"]
+    
+    genai.configure(api_key=api_key)
+    for model_name in possible_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            # Test with a tiny prompt to check connection
+            model.generate_content("Test")
+            return model # Found a working one!
+        except:
+            continue # Try next one
+    return None # None worked
+
+def get_ai_questions(subject, chapter, count=5):
+    api_key = st.session_state.get('api_key')
+    
+    if api_key and HAS_AI:
+        try:
+            # Use the smart model finder
+            model = get_working_model(api_key)
+            
+            if model:
+                prompt = f"""
+                Generate {count} multiple-choice questions for '{subject}' (Chapter: {chapter}).
+                Strictly return a Python list of dictionaries. NO markdown.
+                Format: [{{'q': 'Question?', 'opts': ['A', 'B', 'C', 'D'], 'ans': 'Correct Option Text'}}]
+                """
+                response = model.generate_content(prompt)
+                text = response.text.strip().replace("```python", "").replace("```", "")
+                import ast
+                return ast.literal_eval(text)
+            else:
+                st.error("❌ Key valid, but no available models found. Check Google AI Studio.")
+                
+        except Exception as e:
+            st.error(f"❌ AI Error: {str(e)}")
+            st.toast("Using Backup Questions")
+    
+    # Fallback
+    return random.sample(STATIC_QUESTIONS["Default"], min(count, 10))
+
+def get_ai_notes(topic, context="Engineering"):
+    api_key = st.session_state.get('api_key')
+    if api_key and HAS_AI:
+        try:
+            model = get_working_model(api_key)
+            if model:
+                res = model.generate_content(f"Write study notes for '{topic}' in context of {context}.")
+                return res.text
+        except Exception as e:
+            return f"❌ AI Error: {str(e)}"
+    return "⚠️ AI Key missing or invalid."
+
+# --- 6. SESSION STATE ---
 def generate_mock_students():
     data = {}
     for i in range(1, 26):
@@ -108,52 +164,6 @@ def generate_mock_students():
             }
     return data
 
-def get_ai_questions(subject, chapter, count=5):
-    """
-    ATTEMPTS REAL AI. IF FAILS, SHOWS ERROR AND USES STATIC DATA.
-    """
-    api_key = st.session_state.get('api_key')
-    
-    if api_key and HAS_AI:
-        try:
-            genai.configure(api_key=api_key)
-            # FIX: Switched to 'gemini-pro' (Fixes the 404 error)
-            model = genai.GenerativeModel('gemini-pro')
-            
-            prompt = f"""
-            Generate {count} multiple-choice questions for Engineering subject '{subject}' related to '{chapter}'.
-            Strictly return a valid Python list of dictionaries. 
-            Format: [{{'q': 'Question?', 'opts': ['A', 'B', 'C', 'D'], 'ans': 'Correct Option Text'}}]
-            Do NOT use markdown (no ```python). Just the raw list.
-            """
-            
-            response = model.generate_content(prompt)
-            text = response.text.strip().replace("```python", "").replace("```", "")
-            import ast
-            return ast.literal_eval(text)
-            
-        except Exception as e:
-            st.error(f"❌ AI Error: {str(e)}")
-            st.toast("Using Backup Questions due to AI Error")
-    
-    # Fallback to Static Data (Random Sample)
-    pool = STATIC_QUESTIONS["Default"]
-    return random.sample(pool, min(count, len(pool)))
-
-def get_ai_answer(question, context="General Engineering"):
-    api_key = st.session_state.get('api_key')
-    if api_key and HAS_AI:
-        try:
-            genai.configure(api_key=api_key)
-            # FIX: Switched to 'gemini-pro'
-            model = genai.GenerativeModel('gemini-pro')
-            res = model.generate_content(f"Context: {context}. Question: {question}")
-            return res.text
-        except Exception as e:
-            return f"❌ AI Error: {str(e)}"
-    return "⚠️ Please enter a valid API Key in the sidebar to use AI features."
-
-# --- 6. SESSION STATE ---
 if 'students_data' not in st.session_state: st.session_state.students_data = generate_mock_students()
 if 'teachers_data' not in st.session_state:
     st.session_state.teachers_data = {"teacher1": {"password": "teach123", "name": "Prof. Teacher", "subject": "Engineering Physics", "feedback_score": 4.7, "feedback_comments": [{"comment": "Good pace", "type": "positive"}, {"comment": "More examples needed", "type": "negative"}]}}
@@ -170,15 +180,13 @@ def navigate_to(page):
 # --- 7. SIDEBAR ---
 def render_sidebar():
     with st.sidebar:
-        # ROBUST LOGO LOADER
-        # Checks for logo.png, OR any png if logo.png is missing
+        # SMART LOGO LOADER
         logo_path = "logo.png"
         if not os.path.exists(logo_path):
-            # Try to find any png in the folder to use as fallback
-            all_files = [f for f in os.listdir('.') if f.endswith('.png')]
-            if all_files:
-                logo_path = all_files[0]
-        
+            # Find any png
+            files = [f for f in os.listdir('.') if f.endswith('.png')]
+            if files: logo_path = files[0]
+            
         if os.path.exists(logo_path):
             st.image(logo_path, width=180)
         else:
@@ -236,9 +244,26 @@ def login_register_page():
         reg_role = st.selectbox("Register Role", ["Student", "Teacher"])
         reg_user = st.text_input("New Username")
         reg_pass = st.text_input("New Password", type="password")
+        
+        extra = {}
+        if reg_role == "Teacher":
+            extra['sub'] = st.selectbox("Subject Taught", list(SYLLABUS.keys()))
+        else:
+            extra['roll'] = st.text_input("Roll Number")
+
         if st.button("Create Account"):
             target_db = st.session_state.teachers_data if reg_role == "Teacher" else st.session_state.students_data
-            target_db[reg_user] = {"password": reg_pass, "name": "New User", "has_data": False, "subjects": [], "marks": {}}
+            
+            if reg_role == "Student":
+                target_db[reg_user] = {
+                    "password": reg_pass, "name": "New User", "roll_no": extra['roll'],
+                    "subjects": [], "marks": {}, "attendance": 0, "has_data": False
+                }
+            else:
+                target_db[reg_user] = {
+                    "password": reg_pass, "name": "New User", "subject": extra['sub'],
+                    "feedback_score": 0.0, "feedback_comments": []
+                }
             st.success("Account Created! Go to Login.")
 
 def subject_selection():
@@ -307,12 +332,11 @@ def quiz_feedback():
     
     if st.button("Submit & Return"): navigate_to("student_dashboard")
 
-# --- 9. AI ASSISTANT PAGE (FIXED) ---
+# --- 9. AI ASSISTANT PAGE ---
 def student_ai():
     st.title("🤖 AI Assistant")
     if st.button("⬅ Back"): navigate_to("student_dashboard")
     
-    # RESTORED TABS
     tab1, tab2 = st.tabs(["📄 Ask PDF", "📝 Quiz Maker"])
     
     with tab1:
@@ -326,7 +350,7 @@ def student_ai():
             else:
                 with st.spinner("AI Thinking..."):
                     context = "Uploaded PDF" if uploaded else "General Engineering"
-                    st.info(get_ai_answer(q, context))
+                    st.info(get_ai_notes(q, context))
                     
     with tab2:
         st.subheader("Generate a Practice Quiz")
@@ -338,9 +362,7 @@ def student_ai():
                 st.error("Please enter API Key in sidebar")
             else:
                 with st.spinner("Creating Quiz..."):
-                    # Call the AI function
                     qs = get_ai_questions("Uploaded Material", "General", 3)
-                    
                     st.success("Quiz Generated Below:")
                     for i, q in enumerate(qs):
                         st.markdown(f"**Q{i+1}: {q['q']}**")
@@ -350,7 +372,13 @@ def student_ai():
 # --- 10. TEACHER PAGES ---
 def teacher_dashboard():
     st.title("👨‍🏫 Teacher Dashboard")
-    st.write("Welcome Professor.")
+    data = st.session_state.teachers_data[st.session_state.username]
+    
+    c1, c2 = st.columns(2)
+    c1.metric("Welcome", data['name'])
+    c2.metric("Subject", data['subject'])
+    
+    st.markdown("---")
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -364,10 +392,28 @@ def teacher_profiles():
     st.title("Student Analytics")
     if st.button("Back"): navigate_to("teacher_dashboard")
     
-    # Mock Graphs
-    st.subheader("Class Performance")
-    fig = px.bar(x=["Ch1", "Ch2", "Ch3"], y=[8, 6, 9], labels={'x':'Chapter', 'y':'Avg Marks'})
-    st.plotly_chart(fig)
+    t_sub = st.session_state.teachers_data[st.session_state.username]['subject']
+    students = [s for s in st.session_state.students_data.values() if t_sub in s.get('subjects', [])]
+    
+    if not students:
+        st.warning(f"No students enrolled in {t_sub}")
+        return
+        
+    sel_name = st.selectbox("Select Student", [s['name'] for s in students])
+    student = next(s for s in students if s['name'] == sel_name)
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        if t_sub in student['marks']:
+            scores = student['marks'][t_sub]['chapter_tests']
+            fig = px.bar(x=[f"Ch {i+1}" for i in range(5)], y=scores, title="Chapter Performance")
+            st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        subs = student['subjects']
+        vals = [random.randint(60, 90) for _ in subs]
+        fig2 = go.Figure(data=go.Scatterpolar(r=vals, theta=subs, fill='toself'))
+        fig2.update_layout(title="Overall Growth", polar=dict(radialaxis=dict(visible=True, range=[0, 100])))
+        st.plotly_chart(fig2, use_container_width=True)
 
 def teacher_feedback():
     st.title("Feedback")
@@ -377,7 +423,11 @@ def teacher_feedback():
 def teacher_ai():
     st.title("Teacher AI Tools")
     if st.button("Back"): navigate_to("teacher_dashboard")
-    st.write("Generate Lesson Plans & Questions here.")
+    
+    topic = st.text_input("Enter Topic for Notes")
+    if st.button("Generate"):
+        with st.spinner("Writing..."):
+            st.markdown(get_ai_notes(topic))
 
 # --- 11. MAIN ROUTER ---
 def main():
