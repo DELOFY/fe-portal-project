@@ -6,6 +6,7 @@ from datetime import datetime
 import time
 import random
 import os
+import io
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
@@ -15,12 +16,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Try importing AI library
+# Try importing libraries (Graceful failure)
 try:
     import google.generativeai as genai
     HAS_AI = True
 except ImportError:
     HAS_AI = False
+
+try:
+    import PyPDF2
+    HAS_PDF = True
+except ImportError:
+    HAS_PDF = False
 
 # --- 2. CUSTOM CSS ---
 st.markdown("""
@@ -32,7 +39,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DATA & SYLLABUS ---
+# --- 3. SYLLABUS DATA ---
 SYLLABUS = {
     "Engineering Physics": {"chapters": ["Fundamentals of Photonics", "Quantum Physics", "Wave Optics", "Semiconductor Physics"]},
     "Engineering Chemistry": {"chapters": ["Water Technology", "Instrumental Methods", "Advanced Materials", "Corrosion"]},
@@ -69,27 +76,38 @@ def navigate_to(page):
     st.session_state.current_page = page
     st.rerun()
 
-# --- 5. HELPER: FETCH AVAILABLE MODELS (CACHED TO FIX 429 ERROR) ---
+# --- 5. HELPER FUNCTIONS ---
 @st.cache_data
 def get_available_models(api_key):
-    """Asks Google which models are actually available for this key. Cached to prevent quota spam."""
+    """Cached model fetcher to prevent 429 errors"""
     if not api_key or not HAS_AI: return []
     try:
         genai.configure(api_key=api_key)
         models = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                # Filter for common chat models
                 if 'gemini' in m.name:
                     models.append(m.name)
         return models
     except:
         return []
 
-# --- 6. SIDEBAR (WITH MODEL SELECTOR) ---
+def extract_pdf_text(uploaded_file):
+    """Reads text from uploaded PDF so AI can see it"""
+    if not HAS_PDF: return "PyPDF2 library not installed."
+    try:
+        reader = PyPDF2.PdfReader(uploaded_file)
+        text = ""
+        # Read first 5 pages max to save token limit
+        for i in range(min(len(reader.pages), 5)):
+            text += reader.pages[i].extract_text()
+        return text
+    except Exception as e:
+        return f"Error reading PDF: {e}"
+
+# --- 6. SIDEBAR ---
 def render_sidebar():
     with st.sidebar:
-        # LOGO
         logo_path = "logo.png"
         if not os.path.exists(logo_path):
             files = [f for f in os.listdir('.') if f.endswith('.png')]
@@ -101,25 +119,16 @@ def render_sidebar():
         st.caption("Created by FE DIV-A 2025-26")
         st.markdown("---")
         
-        # API KEY & MODEL SELECTOR
         with st.expander("⚙️ AI Settings", expanded=True):
             key = st.text_input("Gemini API Key", type="password", value=st.session_state.api_key)
-            
             if key:
                 st.session_state.api_key = key
-                # Auto-fetch models (Cached!)
                 valid_models = get_available_models(key)
-                
                 if valid_models:
                     st.success(f"✅ Key Active!")
-                    # Dropdown to pick model
-                    # Try to set default to flash if available (faster/cheaper)
                     default_idx = 0
                     for i, m in enumerate(valid_models):
-                        if 'flash' in m:
-                            default_idx = i
-                            break
-                            
+                        if 'flash' in m: default_idx = i; break
                     st.session_state.selected_model = st.selectbox("Select AI Model", valid_models, index=default_idx)
                 else:
                     st.warning("⚠️ Key invalid or quota exceeded.")
@@ -133,8 +142,9 @@ def render_sidebar():
                 st.session_state.current_page = 'login'
                 st.rerun()
 
-# --- 7. AI FUNCTIONS (USING SELECTED MODEL) ---
-def get_ai_questions(subject, chapter, count=5):
+# --- 7. AI FUNCTIONS ---
+def get_ai_questions(context_text, count=5):
+    """Generates questions based on provided text (Syllabus OR PDF Content)"""
     api_key = st.session_state.get('api_key')
     model_name = st.session_state.get('selected_model')
     
@@ -143,8 +153,13 @@ def get_ai_questions(subject, chapter, count=5):
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(model_name)
             
+            # Truncate context to avoid token limits (approx 3000 chars)
+            safe_context = context_text[:3000]
+            
             prompt = f"""
-            Generate {count} multiple-choice questions for '{subject}' (Chapter: {chapter}).
+            Based on the following text, generate {count} multiple-choice questions.
+            TEXT: "{safe_context}"
+            
             Strictly return a Python list of dictionaries. NO markdown.
             Format: [{{'q': 'Question?', 'opts': ['A', 'B', 'C', 'D'], 'ans': 'Correct Option Text'}}]
             """
@@ -157,7 +172,7 @@ def get_ai_questions(subject, chapter, count=5):
             
     return random.sample(STATIC_QUESTIONS["Default"], min(count, 5))
 
-def get_ai_answer(question, context="General"):
+def get_ai_answer(question, context_text):
     api_key = st.session_state.get('api_key')
     model_name = st.session_state.get('selected_model')
     
@@ -165,22 +180,21 @@ def get_ai_answer(question, context="General"):
         try:
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(model_name)
-            res = model.generate_content(f"Context: {context}. Question: {question}")
+            safe_context = context_text[:3000]
+            res = model.generate_content(f"Context: {safe_context}\n\nQuestion: {question}")
             return res.text
         except Exception as e:
             return f"Error: {str(e)}"
-    return "⚠️ AI Features Disabled (Check Key)"
+    return "⚠️ AI Features Disabled"
 
 # --- 8. PAGES ---
 def login_register_page():
     st.markdown("<h1 style='text-align: center; color: #4db8ff;'>FE Engineering Portal 2024</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔐 Login", "📝 Register"])
-    
     with tab1:
         with st.expander("ℹ️ Demo Credentials"): st.code("Student: student1 / pass123\nTeacher: teacher1 / teach123")
         role = st.radio("Role:", ["Student", "Teacher"], horizontal=True)
         u, p = st.text_input("Username"), st.text_input("Password", type="password")
-        
         if st.button("Login", use_container_width=True):
             db = st.session_state.students_data if role == "Student" else st.session_state.teachers_data
             if u in db and db[u]["password"] == p:
@@ -189,7 +203,6 @@ def login_register_page():
                 st.session_state.username = u
                 navigate_to(f"{role.lower()}_dashboard")
             else: st.error("Invalid Credentials")
-
     with tab2:
         st.write("Registration (Demo Mode)"); st.button("Register")
 
@@ -205,13 +218,14 @@ def student_dashboard():
 def assessment_setup():
     st.title("📝 Setup Quiz")
     if st.button("Back"): navigate_to("student_dashboard")
-    
     sub = st.selectbox("Subject", st.session_state.students_data[st.session_state.username]['subjects'])
     chap = st.selectbox("Chapter", SYLLABUS.get(sub, {'chapters':['General']})['chapters'])
     
     if st.button("Start Quiz", use_container_width=True):
         with st.spinner("Generating..."):
-            qs = get_ai_questions(sub, chap, 5)
+            # Pass Subject + Chapter as context
+            context = f"Subject: {sub}, Chapter: {chap}"
+            qs = get_ai_questions(context, 5)
             st.session_state.quiz_session = {'subject': sub, 'chapter': chap, 'questions': qs}
             navigate_to("quiz_interface")
 
@@ -219,13 +233,11 @@ def quiz_interface():
     if 'quiz_session' not in st.session_state: navigate_to("student_dashboard")
     quiz = st.session_state.quiz_session
     st.header(f"{quiz['subject']}")
-    
     answers = {}
     for i, q in enumerate(quiz['questions']):
         st.markdown(f"**Q{i+1}: {q['q']}**")
         answers[i] = st.radio(f"Select:", q['opts'], key=f"q{i}", index=None)
         st.markdown("---")
-        
     if st.button("Submit"):
         score = sum([1 for i, q in enumerate(quiz['questions']) if answers.get(i) == q['ans']])
         st.success(f"Score: {score}/{len(quiz['questions'])}")
@@ -236,27 +248,35 @@ def student_ai():
     if st.button("Back"): navigate_to("student_dashboard")
     
     tab1, tab2 = st.tabs(["Ask PDF", "Quiz Maker"])
+    
     with tab1:
-        uploaded = st.file_uploader("Upload PDF", type="pdf")
+        uploaded = st.file_uploader("Upload PDF", type="pdf", key="chat_pdf")
         q = st.text_input("Question")
-        if st.button("Ask"): 
-            with st.spinner("Thinking..."): st.info(get_ai_answer(q, "PDF Content" if uploaded else "General"))
-            
+        if st.button("Ask"):
+            if not uploaded: st.error("Upload PDF first")
+            else:
+                with st.spinner("Reading & Thinking..."):
+                    # EXTRACT TEXT HERE
+                    pdf_text = extract_pdf_text(uploaded)
+                    st.info(get_ai_answer(q, pdf_text))
+                    
     with tab2:
         st.subheader("Generate Quiz from File")
-        # RESTORED FILE UPLOADER HERE
         q_file = st.file_uploader("Upload PDF for Quiz", type="pdf", key="q_maker_upload")
         
         if st.button("Generate"):
             if not q_file:
                 st.error("Please upload a file first.")
             else:
-                with st.spinner("Creating Quiz..."):
-                    qs = get_ai_questions("Uploaded File", "General", 3)
+                with st.spinner("Reading PDF & Generating..."):
+                    # EXTRACT TEXT HERE
+                    pdf_text = extract_pdf_text(q_file)
+                    qs = get_ai_questions(pdf_text, 3)
                     for i, q in enumerate(qs): st.write(f"**Q{i+1}: {q['q']}** (Ans: {q['ans']})")
 
 def teacher_dashboard():
     st.title("👨‍🏫 Teacher Dashboard")
+    st.write("Welcome Professor.")
     c1, c2, c3 = st.columns(3)
     if c1.button("Profiles"): st.info("Profiles View")
     if c2.button("Feedback"): st.info("Feedback View")
