@@ -64,6 +64,7 @@ SYLLABUS = {
 }
 
 # --- 4. EXTENDED STATIC BACKUP (15 Questions) ---
+# Used if AI fails so you don't see the "Same 3 Questions"
 STATIC_QUESTIONS = {
     "Default": [
         {"q": "Which law states V=IR?", "opts": ["Ohm's Law", "Newton's Law", "Kirchhoff's Law", "Faraday's Law"], "ans": "Ohm's Law"},
@@ -89,6 +90,7 @@ def get_working_model(api_key):
     """
     Tries multiple model names to find one that works for the user's key.
     """
+    # List of known Gemini models to try
     possible_models = ["gemini-1.5-flash", "gemini-pro", "gemini-1.0-pro", "gemini-1.5-pro-latest"]
     
     genai.configure(api_key=api_key)
