@@ -71,6 +71,7 @@ if 'username' not in st.session_state: st.session_state.username = None
 if 'current_page' not in st.session_state: st.session_state.current_page = 'login'
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
 if 'selected_model' not in st.session_state: st.session_state.selected_model = "gemini-1.5-flash"
+if 'teacher_page' not in st.session_state: st.session_state.teacher_page = "dashboard"
 
 def navigate_to(page):
     st.session_state.current_page = page
@@ -160,14 +161,9 @@ def get_ai_questions(context_text, count=5, difficulty="Medium"):
             # Truncate context to avoid token limits (approx 3000 chars)
             safe_context = context_text[:3000]
             
-            # IMPROVED PROMPT
             prompt = f"""
-            You are an Engineering Professor. Generate {count} multiple-choice questions (MCQs) 
-            specifically about: "{safe_context}".
+            Generate {count} multiple-choice questions (MCQs) specifically about: "{safe_context}".
             Difficulty Level: {difficulty}.
-            
-            The questions must be technical and relevant to the subject matter provided.
-            Do NOT ask generic questions like "What is this text about?".
             
             Strictly return a Python list of dictionaries. NO markdown.
             Format: [{{'q': 'Question Text', 'opts': ['A', 'B', 'C', 'D'], 'ans': 'Correct Option Text'}}]
@@ -215,7 +211,7 @@ def login_register_page():
                 navigate_to(f"{role.lower()}_dashboard")
             else: st.error("Invalid Credentials")
             
-   with tab2:
+    with tab2:
         st.subheader("Create New Account")
         reg_role = st.selectbox("I am a...", ["Student", "Teacher"], key="reg_role")
         reg_name = st.text_input("Full Name", key="reg_name")
@@ -235,7 +231,7 @@ def login_register_page():
                     st.success("Account Created! Please switch to the Login tab.")
             else:
                 st.warning("Please fill in all fields.")
-                
+
 def student_dashboard():
     st.title("🎯 Student Dashboard")
     st.info(f"Subjects: {', '.join(st.session_state.students_data[st.session_state.username]['subjects'])}")
@@ -253,7 +249,6 @@ def assessment_setup():
     
     if st.button("Start Quiz", use_container_width=True):
         with st.spinner("Generating..."):
-            # Pass Subject + Chapter as context
             context = f"Subject: {sub}, Chapter: {chap}. Specific technical engineering concepts."
             qs = get_ai_questions(context, 5, "Medium")
             st.session_state.quiz_session = {'subject': sub, 'chapter': chap, 'questions': qs}
@@ -276,9 +271,7 @@ def quiz_interface():
     if st.button("Submit Assessment"):
         score = sum([1 for i, q in enumerate(quiz['questions']) if answers.get(i) == q['ans']])
         st.success(f"Score: {score}/{len(quiz['questions'])}")
-        
-        # FIX: Navigation is now outside a callback
-        time.sleep(2) # Give user time to see score
+        time.sleep(2)
         st.session_state.current_page = 'student_dashboard'
         st.rerun()
 
@@ -298,11 +291,9 @@ def student_ai():
                     pdf_text = extract_pdf_text(uploaded)
                     st.info(get_ai_answer(q, pdf_text))
                     
-   with tab2:
+    with tab2:
         st.subheader("Generate Quiz from File")
         q_file = st.file_uploader("Upload PDF for Quiz", type="pdf", key="q_maker_upload")
-        
-        # NEW: Difficulty Slider
         difficulty = st.select_slider("Select Difficulty", options=["Easy", "Medium", "Hard"])
         
         if st.button("Generate"):
@@ -311,10 +302,8 @@ def student_ai():
             else:
                 with st.spinner(f"Creating {difficulty} Quiz..."):
                     pdf_text = extract_pdf_text(q_file)
-                    # Pass the difficulty to the AI function
                     context_with_diff = f"Content: {pdf_text[:3000]}... \n\n IMPORTANT: Generate {difficulty} level questions."
-                    qs = get_ai_questions(context_with_diff, 3)
-                    
+                    qs = get_ai_questions(context_with_diff, 3, difficulty)
                     for i, q in enumerate(qs):
                         st.markdown(f"**Q{i+1}: {q['q']}**")
                         st.caption(f"Answer: {q['ans']}")
@@ -324,51 +313,34 @@ def teacher_dashboard():
     st.title("👨‍🏫 Teacher Dashboard")
     st.write(f"Welcome, **{st.session_state.teachers_data[st.session_state.username]['name']}**")
     
-    # Navigation Buttons
     c1, c2, c3 = st.columns(3)
     if c1.button("📊 Profiles"): st.session_state.teacher_page = "profiles"; st.rerun()
     if c2.button("💬 Feedback"): st.session_state.teacher_page = "feedback"; st.rerun()
     if c3.button("🤖 AI Tools"): st.session_state.teacher_page = "ai_tools"; st.rerun()
 
-    t_page = st.session_state.get("teacher_page", "profiles")
+    t_page = st.session_state.get("teacher_page", "dashboard")
     
-    # 1. PROFILES VIEW (With 2 Graphs)
     if t_page == "profiles":
         st.divider()
         st.subheader("Student Performance Analytics")
-        
         c1, c2 = st.columns(2)
         with c1:
-            # Graph 1: Bar Chart
             df = pd.DataFrame({"Student": ["A", "B", "C", "D", "E"], "Score": [85, 92, 78, 88, 72]})
             fig1 = px.bar(df, x="Student", y="Score", title="Class Quiz Average", color="Score")
             st.plotly_chart(fig1, use_container_width=True)
-            
         with c2:
-            # Graph 2: Pie Chart (Pass/Fail)
             df2 = pd.DataFrame({"Status": ["Pass", "Fail", "Borderline"], "Count": [45, 5, 10]})
             fig2 = px.pie(df2, values='Count', names='Status', title="Pass Rate Distribution")
             st.plotly_chart(fig2, use_container_width=True)
+        if st.button("Close View"): st.session_state.teacher_page = "dashboard"; st.rerun()
 
-    # 2. FEEDBACK VIEW (Detailed)
     elif t_page == "feedback":
         st.divider()
         st.subheader("Student Feedback Received")
-        
-        # Mock Feedback Data
-        comments = [
-            {"user": "Student 1", "rating": 5, "text": "The explanation of Newton's laws was very clear!"},
-            {"user": "Student 4", "rating": 3, "text": "Please slow down during the derivation parts."},
-            {"user": "Student 2", "rating": 4, "text": "Good class, but we need more practice problems."}
-        ]
-        
-        avg_rating = sum(c['rating'] for c in comments) / len(comments)
-        st.metric("Average Rating", f"{avg_rating:.1f} / 5.0")
-        
-        for c in comments:
-            st.info(f"⭐ {c['rating']}/5 - {c['text']}")
+        st.info("⭐ 5/5 - The explanation of Newton's laws was very clear!")
+        st.info("⭐ 3/5 - Please slow down during the derivation parts.")
+        if st.button("Close View"): st.session_state.teacher_page = "dashboard"; st.rerun()
 
-    # 3. AI TOOLS VIEW
     elif t_page == "ai_tools":
         st.divider()
         st.subheader("AI Content Generator")
@@ -377,6 +349,7 @@ def teacher_dashboard():
             with st.spinner("AI is working..."):
                 plan = get_ai_answer(f"Create a detailed lesson plan for {topic}", "Teaching Context")
                 st.markdown(plan)
+        if st.button("Close View"): st.session_state.teacher_page = "dashboard"; st.rerun()
 
 def main():
     render_sidebar()
@@ -391,4 +364,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
