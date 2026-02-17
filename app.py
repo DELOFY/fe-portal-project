@@ -10,7 +10,7 @@ import io
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
-    page_title="FE Portal 2024",
+    page_title="AI Academic Assistant 2026",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -115,9 +115,9 @@ def render_sidebar():
             if files: logo_path = files[0]
         
         if os.path.exists(logo_path): st.image(logo_path, width=180)
-        else: st.header("🎓 FE Portal")
+        else: st.header("🎓 AI Assistant")
         
-        st.caption("Created by FE DIV-A 2025-26")
+        st.caption("2026 Academic Edition")
         st.markdown("---")
         
         with st.expander("⚙️ AI Settings", expanded=True):
@@ -195,7 +195,7 @@ def get_ai_answer(question, context_text):
 
 # --- 8. PAGES ---
 def login_register_page():
-    st.markdown("<h1 style='text-align: center; color: #4db8ff;'>FE Engineering Portal 2024</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #4db8ff;'>AI Academic Assistant 2026</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔐 Login", "📝 Register"])
     
     with tab1:
