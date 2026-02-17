@@ -16,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Try importing libraries (Graceful failure)
+# --- LIBRARY CHECKS ---
 try:
     import google.generativeai as genai
     HAS_AI = True
@@ -39,7 +39,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. SYLLABUS DATA ---
+# --- 3. DATA & SYLLABUS ---
 SYLLABUS = {
     "Engineering Physics": {"chapters": ["Fundamentals of Photonics", "Quantum Physics", "Wave Optics", "Semiconductor Physics"]},
     "Engineering Chemistry": {"chapters": ["Water Technology", "Instrumental Methods", "Advanced Materials", "Corrosion"]},
@@ -94,7 +94,7 @@ def get_available_models(api_key):
 
 def extract_pdf_text(uploaded_file):
     """Reads text from uploaded PDF so AI can see it"""
-    if not HAS_PDF: return "PyPDF2 library not installed."
+    if not HAS_PDF: return "ERROR: PyPDF2 library not installed. Please install it to read PDFs."
     try:
         reader = PyPDF2.PdfReader(uploaded_file)
         text = ""
@@ -126,6 +126,10 @@ def render_sidebar():
                 valid_models = get_available_models(key)
                 if valid_models:
                     st.success(f"✅ Key Active!")
+                    # Check PDF Status
+                    if HAS_PDF: st.success("✅ PDF Reader Active")
+                    else: st.error("❌ PDF Reader Missing")
+                    
                     default_idx = 0
                     for i, m in enumerate(valid_models):
                         if 'flash' in m: default_idx = i; break
@@ -143,7 +147,7 @@ def render_sidebar():
                 st.rerun()
 
 # --- 7. AI FUNCTIONS ---
-def get_ai_questions(context_text, count=5):
+def get_ai_questions(context_text, count=5, difficulty="Medium"):
     """Generates questions based on provided text (Syllabus OR PDF Content)"""
     api_key = st.session_state.get('api_key')
     model_name = st.session_state.get('selected_model')
@@ -156,13 +160,19 @@ def get_ai_questions(context_text, count=5):
             # Truncate context to avoid token limits (approx 3000 chars)
             safe_context = context_text[:3000]
             
+            # IMPROVED PROMPT
             prompt = f"""
-            Based on the following text, generate {count} multiple-choice questions.
-            TEXT: "{safe_context}"
+            You are an Engineering Professor. Generate {count} multiple-choice questions (MCQs) 
+            specifically about: "{safe_context}".
+            Difficulty Level: {difficulty}.
+            
+            The questions must be technical and relevant to the subject matter provided.
+            Do NOT ask generic questions like "What is this text about?".
             
             Strictly return a Python list of dictionaries. NO markdown.
-            Format: [{{'q': 'Question?', 'opts': ['A', 'B', 'C', 'D'], 'ans': 'Correct Option Text'}}]
+            Format: [{{'q': 'Question Text', 'opts': ['A', 'B', 'C', 'D'], 'ans': 'Correct Option Text'}}]
             """
+            
             response = model.generate_content(prompt)
             text = response.text.strip().replace("```python", "").replace("```", "")
             import ast
@@ -191,6 +201,7 @@ def get_ai_answer(question, context_text):
 def login_register_page():
     st.markdown("<h1 style='text-align: center; color: #4db8ff;'>FE Engineering Portal 2024</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔐 Login", "📝 Register"])
+    
     with tab1:
         with st.expander("ℹ️ Demo Credentials"): st.code("Student: student1 / pass123\nTeacher: teacher1 / teach123")
         role = st.radio("Role:", ["Student", "Teacher"], horizontal=True)
@@ -203,8 +214,24 @@ def login_register_page():
                 st.session_state.username = u
                 navigate_to(f"{role.lower()}_dashboard")
             else: st.error("Invalid Credentials")
+            
     with tab2:
-        st.write("Registration (Demo Mode)"); st.button("Register")
+        st.subheader("Create New Account")
+        reg_role = st.selectbox("I am a...", ["Student", "Teacher"])
+        reg_user = st.text_input("Choose Username")
+        reg_pass = st.text_input("Choose Password", type="password")
+        
+        if st.button("Create Account"):
+            target_db = st.session_state.teachers_data if reg_role == "Teacher" else st.session_state.students_data
+            if reg_user in target_db:
+                st.error("Username already exists!")
+            else:
+                # Create basic profile
+                if reg_role == "Student":
+                    target_db[reg_user] = {"password": reg_pass, "name": reg_user, "subjects": [], "marks": {}, "attendance": 0, "has_data": False}
+                else:
+                    target_db[reg_user] = {"password": reg_pass, "name": reg_user, "subject": "General", "feedback_score": 0, "feedback_comments": []}
+                st.success("Account Created! Please switch to Login tab.")
 
 def student_dashboard():
     st.title("🎯 Student Dashboard")
@@ -224,8 +251,8 @@ def assessment_setup():
     if st.button("Start Quiz", use_container_width=True):
         with st.spinner("Generating..."):
             # Pass Subject + Chapter as context
-            context = f"Subject: {sub}, Chapter: {chap}"
-            qs = get_ai_questions(context, 5)
+            context = f"Subject: {sub}, Chapter: {chap}. Specific technical engineering concepts."
+            qs = get_ai_questions(context, 5, "Medium")
             st.session_state.quiz_session = {'subject': sub, 'chapter': chap, 'questions': qs}
             navigate_to("quiz_interface")
 
@@ -238,10 +265,13 @@ def quiz_interface():
         st.markdown(f"**Q{i+1}: {q['q']}**")
         answers[i] = st.radio(f"Select:", q['opts'], key=f"q{i}", index=None)
         st.markdown("---")
+    
     if st.button("Submit"):
         score = sum([1 for i, q in enumerate(quiz['questions']) if answers.get(i) == q['ans']])
         st.success(f"Score: {score}/{len(quiz['questions'])}")
-        st.button("Return", on_click=lambda: navigate_to("student_dashboard"))
+        # FIX: Removed on_click callback that caused the error
+        if st.button("Return to Dashboard"):
+            navigate_to("student_dashboard")
 
 def student_ai():
     st.title("🤖 AI Assistant")
@@ -256,31 +286,65 @@ def student_ai():
             if not uploaded: st.error("Upload PDF first")
             else:
                 with st.spinner("Reading & Thinking..."):
-                    # EXTRACT TEXT HERE
                     pdf_text = extract_pdf_text(uploaded)
                     st.info(get_ai_answer(q, pdf_text))
                     
     with tab2:
         st.subheader("Generate Quiz from File")
         q_file = st.file_uploader("Upload PDF for Quiz", type="pdf", key="q_maker_upload")
+        difficulty = st.select_slider("Select Difficulty", options=["Easy", "Medium", "Hard"])
         
         if st.button("Generate"):
             if not q_file:
                 st.error("Please upload a file first.")
             else:
                 with st.spinner("Reading PDF & Generating..."):
-                    # EXTRACT TEXT HERE
                     pdf_text = extract_pdf_text(q_file)
-                    qs = get_ai_questions(pdf_text, 3)
+                    qs = get_ai_questions(pdf_text, 3, difficulty)
                     for i, q in enumerate(qs): st.write(f"**Q{i+1}: {q['q']}** (Ans: {q['ans']})")
 
 def teacher_dashboard():
     st.title("👨‍🏫 Teacher Dashboard")
     st.write("Welcome Professor.")
+    
     c1, c2, c3 = st.columns(3)
-    if c1.button("Profiles"): st.info("Profiles View")
-    if c2.button("Feedback"): st.info("Feedback View")
-    if c3.button("AI Tools"): st.info("AI Tools View")
+    # FIX: Added actual navigation for teacher buttons
+    if c1.button("📊 Profiles"): 
+        st.session_state.teacher_page = "profiles"
+        st.rerun()
+    if c2.button("💬 Feedback"): 
+        st.session_state.teacher_page = "feedback"
+        st.rerun()
+    if c3.button("🤖 AI Tools"): 
+        st.session_state.teacher_page = "ai_tools"
+        st.rerun()
+
+    # Teacher Sub-page Router
+    t_page = st.session_state.get("teacher_page", "dashboard")
+    
+    if t_page == "profiles":
+        st.divider()
+        st.subheader("Student Profiles")
+        # Mock Graph
+        df = pd.DataFrame({"Student": ["A", "B", "C", "D"], "Score": [85, 92, 78, 88]})
+        fig = px.bar(df, x="Student", y="Score", title="Class Performance")
+        st.plotly_chart(fig)
+        if st.button("Close View"): st.session_state.teacher_page = "dashboard"; st.rerun()
+        
+    elif t_page == "feedback":
+        st.divider()
+        st.subheader("Student Feedback")
+        st.info("Course Pace: 4.5/5")
+        st.warning("Needs more practical examples.")
+        if st.button("Close View"): st.session_state.teacher_page = "dashboard"; st.rerun()
+        
+    elif t_page == "ai_tools":
+        st.divider()
+        st.subheader("Lesson Planner")
+        topic = st.text_input("Enter Topic")
+        if st.button("Generate Plan"):
+            st.write(get_ai_answer(f"Create a lesson plan for {topic}", "Teaching"))
+        if st.button("Close View"): st.session_state.teacher_page = "dashboard"; st.rerun()
 
 def main():
     render_sidebar()
