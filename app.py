@@ -7,6 +7,7 @@ import time
 import random
 import os
 import io
+import json  # NEW: Added for permanent data storage
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
@@ -60,11 +61,58 @@ STATIC_QUESTIONS = {
     ]
 }
 
-# --- 4. SESSION STATE ---
+# --- 4. SESSION STATE & DATA PERSISTENCE ---
+DATA_FILE = "users_data.json"
+
+def load_data():
+    """Loads user data from a local JSON file. Creates 8 dummy students if file doesn't exist."""
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r") as f:
+            return json.load(f)
+    else:
+        # Generate 8 Dummy Students
+        dummy_students = {}
+        for i in range(1, 9):
+            dummy_students[f"student{i}"] = {
+                "password": "pass123", 
+                "name": f"Student {i}", 
+                "roll_no": f"FE00{i}", 
+                "subjects": random.sample(list(SYLLABUS.keys()), 4), 
+                "marks": {}, 
+                "attendance": random.randint(65, 98), 
+                "has_data": True
+            }
+        
+        default_data = {
+            "students": dummy_students,
+            "teachers": {
+                "teacher1": {
+                    "password": "teach123", 
+                    "name": "Prof. Teacher", 
+                    "subject": "Engineering Physics", 
+                    "feedback_score": 4.7, 
+                    "feedback_comments": [{"comment": "Good", "type": "positive"}]
+                }
+            }
+        }
+        # Save the generated defaults to the file
+        with open(DATA_FILE, "w") as f:
+            json.dump(default_data, f)
+        return default_data
+
+def save_data(students, teachers):
+    """Saves current memory to the permanent JSON file."""
+    with open(DATA_FILE, "w") as f:
+        json.dump({"students": students, "teachers": teachers}, f)
+
+# Initialize Session State Variables
+if 'app_data' not in st.session_state:
+    st.session_state.app_data = load_data()
+    
 if 'students_data' not in st.session_state:
-    st.session_state.students_data = {"student1": {"password": "pass123", "name": "Student 1", "roll_no": "FE001", "subjects": list(SYLLABUS.keys())[:5], "marks": {}, "attendance": 85, "has_data": True}}
+    st.session_state.students_data = st.session_state.app_data['students']
 if 'teachers_data' not in st.session_state:
-    st.session_state.teachers_data = {"teacher1": {"password": "teach123", "name": "Prof. Teacher", "subject": "Engineering Physics", "feedback_score": 4.7, "feedback_comments": [{"comment": "Good", "type": "positive"}]}}
+    st.session_state.teachers_data = st.session_state.app_data['teachers']
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'user_type' not in st.session_state: st.session_state.user_type = None
 if 'username' not in st.session_state: st.session_state.username = None
@@ -128,7 +176,6 @@ def render_sidebar():
                 valid_models = get_available_models(key)
                 if valid_models:
                     st.success(f"✅ Key Active!")
-                    # Check PDF Status
                     if HAS_PDF: st.success("✅ PDF Reader Active")
                     else: st.error("❌ PDF Reader Missing")
                     
@@ -205,7 +252,7 @@ def login_register_page():
     tab1, tab2 = st.tabs(["🔐 Login", "📝 Register"])
     
     with tab1:
-        with st.expander("ℹ️ Demo Credentials"): st.code("Student: student1 / pass123\nTeacher: teacher1 / teach123")
+        with st.expander("ℹ️ Demo Credentials"): st.code("Student: student1 to student8 (pass123)\nTeacher: teacher1 (teach123)")
         role = st.radio("Role:", ["Student", "Teacher"], horizontal=True)
         u, p = st.text_input("Username"), st.text_input("Password", type="password")
         if st.button("Login", use_container_width=True):
@@ -230,11 +277,16 @@ def login_register_page():
                 if reg_user in target_db:
                     st.error("Username already exists!")
                 else:
+                    # Create the appropriate profile
                     if reg_role == "Student":
                         target_db[reg_user] = {"password": reg_pass, "name": reg_name, "subjects": [], "marks": {}, "attendance": 0, "has_data": False}
                     else:
                         target_db[reg_user] = {"password": reg_pass, "name": reg_name, "subject": "General", "feedback_score": 0.0, "feedback_comments": []}
-                    st.success("Account Created! Please switch to the Login tab.")
+                    
+                    # SAVE PERMANENTLY TO JSON FILE
+                    save_data(st.session_state.students_data, st.session_state.teachers_data)
+                    
+                    st.success("Account Created & Saved! Please switch to the Login tab.")
             else:
                 st.warning("Please fill in all fields.")
 
@@ -250,7 +302,12 @@ def student_dashboard():
 def assessment_setup():
     st.title("📝 Setup Quiz")
     if st.button("Back"): navigate_to("student_dashboard")
-    sub = st.selectbox("Subject", st.session_state.students_data[st.session_state.username]['subjects'])
+    
+    # Safety check if student has no subjects yet
+    subjects = st.session_state.students_data[st.session_state.username].get('subjects', [])
+    if not subjects: subjects = ["General Engineering"]
+    
+    sub = st.selectbox("Subject", subjects)
     chap = st.selectbox("Chapter", SYLLABUS.get(sub, {'chapters':['General']})['chapters'])
     
     st.write("**(Required for exact questions) Upload your Syllabus PDF:**")
@@ -349,10 +406,7 @@ def teacher_dashboard():
             
         st.markdown("---")
         
-        # --- NEW ADDITION: Individual Student Data ---
         st.subheader("🧑‍🎓 Individual Student Analysis")
-        
-        # Fetch all registered students
         student_usernames = list(st.session_state.students_data.keys())
         student_display_names = [st.session_state.students_data[u]['name'] for u in student_usernames]
         
@@ -363,7 +417,6 @@ def teacher_dashboard():
             
             col_a, col_b = st.columns([1, 2])
             with col_a:
-                # Use real attendance if available, otherwise default to 85%
                 att_val = student_info.get('attendance', 85)
                 st.metric(label="Current Attendance", value=f"{att_val}%", delta="-2%" if att_val < 75 else "+1%")
                 st.metric(label="Assessments Completed", value=random.randint(2, 8))
@@ -381,7 +434,6 @@ def teacher_dashboard():
                     st.info("Student hasn't enrolled in any subjects yet.")
         else:
             st.warning("No students are currently registered in the system.")
-        # --- END OF NEW ADDITION ---
 
         if st.button("Close View"): st.session_state.teacher_page = "dashboard"; st.rerun()
 
