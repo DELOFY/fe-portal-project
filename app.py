@@ -65,12 +65,10 @@ STATIC_QUESTIONS = {
 DATA_FILE = "users_data.json"
 
 def load_data():
-    """Loads user data from a local JSON file. Creates 8 dummy students if file doesn't exist."""
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
             return json.load(f)
     else:
-        # Generate 8 Dummy Students
         dummy_students = {}
         for i in range(1, 9):
             dummy_students[f"student{i}"] = {
@@ -91,7 +89,7 @@ def load_data():
                     "name": "Prof. Teacher", 
                     "subject": "Engineering Physics", 
                     "feedback_score": 4.7, 
-                    "feedback_comments": [{"comment": "Good", "type": "positive"}]
+                    "feedback_comments": [{"rating": 5, "comment": "Great class!", "subject": "General"}]
                 }
             }
         }
@@ -100,11 +98,9 @@ def load_data():
         return default_data
 
 def save_data(students, teachers):
-    """Saves current memory to the permanent JSON file."""
     with open(DATA_FILE, "w") as f:
         json.dump({"students": students, "teachers": teachers}, f)
 
-# Initialize Session State Variables
 if 'app_data' not in st.session_state:
     st.session_state.app_data = load_data()
     
@@ -273,7 +269,6 @@ def login_register_page():
                 if reg_user in target_db:
                     st.error("Username already exists!")
                 else:
-                    # FIX: Give new students the actual syllabus subjects instead of an empty list
                     if reg_role == "Student":
                         target_db[reg_user] = {"password": reg_pass, "name": reg_name, "subjects": list(SYLLABUS.keys()), "marks": {}, "attendance": 0, "has_data": False}
                     else:
@@ -286,7 +281,6 @@ def login_register_page():
 
 def student_dashboard():
     st.title("🎯 Student Dashboard")
-    # FIX: Safety check for subjects to ensure it displays correctly for old accounts
     subjects = st.session_state.students_data[st.session_state.username].get('subjects', [])
     if not subjects: subjects = list(SYLLABUS.keys())
         
@@ -302,7 +296,6 @@ def assessment_setup():
     st.title("📝 Setup Quiz")
     if st.button("Back"): navigate_to("student_dashboard")
     
-    # FIX: If student has an older account with no subjects, give them all options
     subjects = st.session_state.students_data[st.session_state.username].get('subjects', [])
     if not subjects: subjects = list(SYLLABUS.keys())
     
@@ -337,10 +330,29 @@ def quiz_interface():
         st.markdown(f"**Q{i+1}: {q['q']}**")
         answers[i] = st.radio(f"Select Answer {i+1}:", q['opts'], key=f"q{i}", index=None)
         st.markdown("---")
+        
+    # --- NEW ADDITION: Feedback Option ---
+    st.subheader("📝 Quick Feedback (Optional)")
+    feedback_rating = st.slider("Rate the clarity of this quiz (1-Poor, 5-Excellent)", 1, 5, 4)
+    feedback_comment = st.text_input("Any concepts you struggled with?", placeholder="e.g., I didn't understand the third question...")
+    st.markdown("---")
+    # -------------------------------------
     
     if st.button("Submit Assessment"):
         score = sum([1 for i, q in enumerate(quiz['questions']) if answers.get(i) == q['ans']])
         st.success(f"Score: {score}/{len(quiz['questions'])}")
+        
+        # Save feedback data to the teacher's profile
+        if feedback_comment or feedback_rating:
+            if 'feedback_comments' not in st.session_state.teachers_data['teacher1']:
+                st.session_state.teachers_data['teacher1']['feedback_comments'] = []
+            st.session_state.teachers_data['teacher1']['feedback_comments'].append({
+                "rating": feedback_rating,
+                "comment": feedback_comment if feedback_comment else "Completed assessment without comments.",
+                "subject": quiz['subject']
+            })
+            save_data(st.session_state.students_data, st.session_state.teachers_data)
+            
         time.sleep(2)
         st.session_state.current_page = 'student_dashboard'
         st.rerun()
@@ -436,12 +448,59 @@ def teacher_dashboard():
 
         if st.button("Close View"): st.session_state.teacher_page = "dashboard"; st.rerun()
 
+    # --- NEW ADDITION: Detailed Feedback Page ---
     elif t_page == "feedback":
         st.divider()
-        st.subheader("Student Feedback Received")
-        st.info("⭐ 5/5 - The explanation of Newton's laws was very clear!")
-        st.info("⭐ 3/5 - Please slow down during the derivation parts.")
+        st.subheader("📈 Class Comprehension & Feedback Analysis")
+        
+        st.write("### 🧠 Concept Understanding Breakdown")
+        col_f1, col_f2 = st.columns(2)
+        
+        with col_f1:
+            # Concept Understanding Graph
+            concept_data = pd.DataFrame({
+                "Concept": ["Quantum Physics", "Wave Optics", "Photonics", "Semiconductors"],
+                "Understanding (%)": [82, 45, 60, 90]
+            })
+            fig_concepts = px.bar(concept_data, x="Understanding (%)", y="Concept", orientation='h',
+                                  title="Class Average per Concept", color="Understanding (%)",
+                                  color_continuous_scale="RdYlGn")
+            st.plotly_chart(fig_concepts, use_container_width=True)
+            
+        with col_f2:
+            # Action Plan for Weak Areas
+            st.write("### 🛠️ Solutions for Weak Areas")
+            st.error("**Critical Weakness:** Wave Optics (45% Comprehension)")
+            st.warning("**Secondary Weakness:** Fundamentals of Photonics (60% Comprehension)")
+            
+            st.write("**Recommended Actions:**")
+            st.write("1. **Wave Optics:** Assign interactive simulation labs for diffraction.")
+            st.write("2. **Photonics:** Provide a 15-minute recap video covering basic principles.")
+            st.write("3. **General:** Host a Q&A session this Friday focusing on these chapters.")
+            
+            if st.button("Generate AI Remedial Plan"):
+                with st.spinner("Generating detailed AI action plan..."):
+                    plan = get_ai_answer("Generate a 3-step remedial lesson plan for engineering students struggling with Wave Optics and Photonics.", "Teaching Context")
+                    st.success("Plan Generated:")
+                    st.markdown(plan)
+
+        st.markdown("---")
+        
+        # Real-time Student Comments
+        st.write("### 💬 Recent Student Comments")
+        comments = st.session_state.teachers_data[st.session_state.username].get('feedback_comments', [])
+        
+        if not comments:
+            st.info("No feedback received yet.")
+        else:
+            # Loop through the latest 5 comments backwards (newest first)
+            for c in comments[::-1][:5]:
+                rating = c.get('rating', 5)
+                comment_text = c.get('comment', 'No specific comment provided.')
+                st.info(f"⭐ {rating}/5 - {comment_text}")
+
         if st.button("Close View"): st.session_state.teacher_page = "dashboard"; st.rerun()
+    # ---------------------------------------------
 
     elif t_page == "ai_tools":
         st.divider()
