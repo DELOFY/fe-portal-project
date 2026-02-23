@@ -7,7 +7,7 @@ import time
 import random
 import os
 import io
-import json  # NEW: Added for permanent data storage
+import json  
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(
@@ -95,7 +95,6 @@ def load_data():
                 }
             }
         }
-        # Save the generated defaults to the file
         with open(DATA_FILE, "w") as f:
             json.dump(default_data, f)
         return default_data
@@ -128,7 +127,6 @@ def navigate_to(page):
 # --- 5. HELPER FUNCTIONS ---
 @st.cache_data
 def get_available_models(api_key):
-    """Cached model fetcher to prevent 429 errors"""
     if not api_key or not HAS_AI: return []
     try:
         genai.configure(api_key=api_key)
@@ -142,7 +140,6 @@ def get_available_models(api_key):
         return []
 
 def extract_pdf_text(uploaded_file):
-    """Reads text from uploaded PDF so AI can see it"""
     if not HAS_PDF: return "ERROR: PyPDF2 library not installed. Please install it to read PDFs."
     try:
         reader = PyPDF2.PdfReader(uploaded_file)
@@ -197,7 +194,6 @@ def render_sidebar():
 
 # --- 7. AI FUNCTIONS ---
 def get_ai_questions(context_text, count=5, difficulty="Medium"):
-    """Generates questions based on provided text (Syllabus OR PDF Content)"""
     api_key = st.session_state.get('api_key')
     model_name = st.session_state.get('selected_model')
     
@@ -277,22 +273,25 @@ def login_register_page():
                 if reg_user in target_db:
                     st.error("Username already exists!")
                 else:
-                    # Create the appropriate profile
+                    # FIX: Give new students the actual syllabus subjects instead of an empty list
                     if reg_role == "Student":
-                        target_db[reg_user] = {"password": reg_pass, "name": reg_name, "subjects": [], "marks": {}, "attendance": 0, "has_data": False}
+                        target_db[reg_user] = {"password": reg_pass, "name": reg_name, "subjects": list(SYLLABUS.keys()), "marks": {}, "attendance": 0, "has_data": False}
                     else:
                         target_db[reg_user] = {"password": reg_pass, "name": reg_name, "subject": "General", "feedback_score": 0.0, "feedback_comments": []}
                     
-                    # SAVE PERMANENTLY TO JSON FILE
                     save_data(st.session_state.students_data, st.session_state.teachers_data)
-                    
                     st.success("Account Created & Saved! Please switch to the Login tab.")
             else:
                 st.warning("Please fill in all fields.")
 
 def student_dashboard():
     st.title("🎯 Student Dashboard")
-    st.info(f"Subjects: {', '.join(st.session_state.students_data[st.session_state.username]['subjects'])}")
+    # FIX: Safety check for subjects to ensure it displays correctly for old accounts
+    subjects = st.session_state.students_data[st.session_state.username].get('subjects', [])
+    if not subjects: subjects = list(SYLLABUS.keys())
+        
+    st.info(f"Subjects Enrolled: {', '.join(subjects)}")
+    
     c1, c2 = st.columns(2)
     with c1: 
         if st.button("📝 Take Assessment", use_container_width=True): navigate_to("assessment_setup")
@@ -303,9 +302,9 @@ def assessment_setup():
     st.title("📝 Setup Quiz")
     if st.button("Back"): navigate_to("student_dashboard")
     
-    # Safety check if student has no subjects yet
+    # FIX: If student has an older account with no subjects, give them all options
     subjects = st.session_state.students_data[st.session_state.username].get('subjects', [])
-    if not subjects: subjects = ["General Engineering"]
+    if not subjects: subjects = list(SYLLABUS.keys())
     
     sub = st.selectbox("Subject", subjects)
     chap = st.selectbox("Chapter", SYLLABUS.get(sub, {'chapters':['General']})['chapters'])
