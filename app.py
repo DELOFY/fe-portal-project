@@ -99,9 +99,11 @@ def extract_pdf_text(uploaded_file):
     try:
         reader = PyPDF2.PdfReader(uploaded_file)
         text = ""
-        # Read first 5 pages max to save token limit
-        for i in range(min(len(reader.pages), 5)):
-            text += reader.pages[i].extract_text()
+        # FIX: Removed the 5-page limit so it reads the entire syllabus document
+        for page in reader.pages:
+            extracted_text = page.extract_text()
+            if extracted_text:
+                text += extracted_text + "\n"
         return text
     except Exception as e:
         return f"Error reading PDF: {e}"
@@ -158,12 +160,19 @@ def get_ai_questions(context_text, count=5, difficulty="Medium"):
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(model_name)
             
-            # Truncate context to avoid token limits (approx 3000 chars)
-            safe_context = context_text[:3000]
+            # FIX: Removed the 3000 character restriction so the AI can process the full 65-page document
+            safe_context = context_text 
             
+            # FIX: Stricter prompt explicitly forbidding out-of-portion questions
             prompt = f"""
-            Generate {count} multiple-choice questions (MCQs) specifically about: "{safe_context}".
+            You are a strict Engineering Professor. Generate {count} multiple-choice questions (MCQs).
+            STRICTLY base the questions ONLY on the concepts, formulas, and topics found in the following syllabus text:
+            
+            "{safe_context}"
+            
             Difficulty Level: {difficulty}.
+            Do NOT ask generic or meta questions like "What is the subject about?". 
+            Ask highly technical questions regarding the actual engineering principles inside the chapter.
             
             Strictly return a Python list of dictionaries. NO markdown.
             Format: [{{'q': 'Question Text', 'opts': ['A', 'B', 'C', 'D'], 'ans': 'Correct Option Text'}}]
@@ -186,7 +195,8 @@ def get_ai_answer(question, context_text):
         try:
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(model_name)
-            safe_context = context_text[:3000]
+            # FIX: Removed truncation limit here as well
+            safe_context = context_text 
             res = model.generate_content(f"Context: {safe_context}\n\nQuestion: {question}")
             return res.text
         except Exception as e:
@@ -247,12 +257,22 @@ def assessment_setup():
     sub = st.selectbox("Subject", st.session_state.students_data[st.session_state.username]['subjects'])
     chap = st.selectbox("Chapter", SYLLABUS.get(sub, {'chapters':['General']})['chapters'])
     
+    # FIX: Added an upload box strictly for the syllabus to ensure questions are in portion
+    st.write("**(Required for exact questions) Upload your Syllabus PDF:**")
+    syl_file = st.file_uploader("Upload Syllabus", type="pdf", key="syllabus_upload_assessment")
+    
     if st.button("Start Quiz", use_container_width=True):
-        with st.spinner("Generating..."):
-            context = f"Subject: {sub}, Chapter: {chap}. Specific technical engineering concepts."
-            qs = get_ai_questions(context, 5, "Medium")
-            st.session_state.quiz_session = {'subject': sub, 'chapter': chap, 'questions': qs}
-            navigate_to("quiz_interface")
+        if not syl_file:
+            st.warning("⚠️ Please upload your Syllabus PDF first to get precise chapter questions.")
+        else:
+            with st.spinner("Reading Syllabus & Generating Precise Questions..."):
+                pdf_text = extract_pdf_text(syl_file)
+                # Instruct AI to find the specific section in the massive text block
+                context = f"Subject: {sub}, Chapter: {chap}.\nFind the specific section for this subject and chapter in the following syllabus text, and generate questions ONLY from those exact topics:\n\n{pdf_text}"
+                
+                qs = get_ai_questions(context, 5, "Medium")
+                st.session_state.quiz_session = {'subject': sub, 'chapter': chap, 'questions': qs}
+                navigate_to("quiz_interface")
 
 def quiz_interface():
     if 'quiz_session' not in st.session_state: 
@@ -302,7 +322,8 @@ def student_ai():
             else:
                 with st.spinner(f"Creating {difficulty} Quiz..."):
                     pdf_text = extract_pdf_text(q_file)
-                    context_with_diff = f"Content: {pdf_text[:3000]}... \n\n IMPORTANT: Generate {difficulty} level questions."
+                    # FIX: Removed truncation limit here as well
+                    context_with_diff = f"Content: {pdf_text}\n\n IMPORTANT: Generate {difficulty} level questions."
                     qs = get_ai_questions(context_with_diff, 3, difficulty)
                     for i, q in enumerate(qs):
                         st.markdown(f"**Q{i+1}: {q['q']}**")
